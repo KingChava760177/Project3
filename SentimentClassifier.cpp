@@ -4,6 +4,17 @@
 #include <iostream>
 #include <iomanip>
 #include <string>
+#include <unordered_set>
+
+// Define a set of stop words
+const std::unordered_set<std::string> stopWords = {
+    "the", "is", "in", "at", "of", "and", "a", "to", "it", "for", "on", "with",
+    "as", "this", "that", "by", "an", "be", "are", "was", "were", "has", "had",
+    "but", "not", "no", "if", "from", "so", "about"
+};
+
+// Define a set of negation words
+const std::unordered_set<std::string> negationWords = {"not", "no", "never", "none", "nobody", "nothing"};
 
 void SentimentClassifier::train(const char* trainingDataFile) {
     std::ifstream file(trainingDataFile);
@@ -25,24 +36,48 @@ void SentimentClassifier::train(const char* trainingDataFile) {
         std::getline(ss, user, ',');
         std::getline(ss, tweet);
 
-        // Validate and convert sentiment
         int sentimentValue;
         try {
             sentimentValue = std::stoi(sentiment);
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
             std::cerr << "Invalid sentiment value in line: " << line << "\n";
-            continue;  // Skip this line if sentiment is invalid
+            continue;
         }
 
-        // Tokenize tweet and update positive/negative word counts
+        // Tokenize tweet and apply stop word and negation filtering
         std::stringstream tweetStream(tweet);
         std::string word;
+        bool negate = false;
         while (tweetStream >> word) {
-            DSString dsWord(word.c_str());  // Convert to DSString
-            if (sentimentValue == 4) {
-                positiveWords[dsWord]++;
-            } else if (sentimentValue == 0) {
-                negativeWords[dsWord]++;
+            // Skip stop words
+            if (stopWords.find(word) != stopWords.end()) {
+                continue;
+            }
+
+            // Check for negation words
+            if (negationWords.find(word) != negationWords.end()) {
+                negate = true;
+                continue;
+            }
+
+            // Stem word and create DSString
+            DSString dsWord(word.c_str());
+            
+            // Apply negation if needed
+            if (negate) {
+                // Invert sentiment effect
+                if (sentimentValue == 4) {
+                    negativeWords[dsWord]++;
+                } else {
+                    positiveWords[dsWord]++;
+                }
+                negate = false;  // Reset negation after one word
+            } else {
+                if (sentimentValue == 4) {
+                    positiveWords[dsWord]++;
+                } else {
+                    negativeWords[dsWord]++;
+                }
             }
         }
     }
@@ -53,18 +88,48 @@ int SentimentClassifier::predict(const DSString& tweet) {
     int score = 0;
     std::stringstream tweetStream(tweet.c_str());
     std::string word;
+    bool negate = false;
 
     while (tweetStream >> word) {
-        DSString dsWord(word.c_str());  // Convert to DSString
-        if (positiveWords.find(dsWord) != positiveWords.end()) {
-            score++;
+        // Skip stop words
+        if (stopWords.find(word) != stopWords.end()) {
+            continue;
         }
-        if (negativeWords.find(dsWord) != negativeWords.end()) {
-            score--;
+
+        // Check for negation words
+        if (negationWords.find(word) != negationWords.end()) {
+            negate = true;
+            continue;
+        }
+
+        // Stem word and create DSString
+        DSString dsWord(word.c_str());
+
+        // Apply negation if needed
+        if (negate) {
+            if (positiveWords.find(dsWord) != positiveWords.end()) {
+                score--;
+            }
+            if (negativeWords.find(dsWord) != negativeWords.end()) {
+                score++;
+            }
+            negate = false;  // Reset negation after one word
+        } else {
+            if (positiveWords.find(dsWord) != positiveWords.end()) {
+                score++;
+            }
+            if (negativeWords.find(dsWord) != negativeWords.end()) {
+                score--;
+            }
         }
     }
-    return score > 0 ? 4 : 0; // Return 4 for positive, 0 for negative
+
+    // Adjust score threshold: Experiment with different values (score >= 0)
+    return score >= 0 ? 4 : 0;  // Return 4 for positive, 0 for negative
 }
+
+
+
 
 double SentimentClassifier::evaluate(const char* testFile, const char* truthFile, const char* resultFile, const char* accuracyFile) {
     std::ifstream testFileStream(testFile);
